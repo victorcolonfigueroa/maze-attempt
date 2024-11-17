@@ -1,14 +1,12 @@
 
 #include <stdlib.h>
-#include <GL/glut.h>
+#include <GL/glut.h> //mac
 #include <math.h>
-
-#include "Textures/All_Textures.ppm"
-#include "Textures/sky.ppm"
-#include "Textures/title.ppm"
-#include "Textures/won.ppm"
-#include "Textures/lost.ppm"
-#include "Textures/sprites.ppm"
+#include <printf.h>
+#include "minimap.h"
+#include "texture.h"
+#include "sprite.h"
+#include "rain.h"
 
 float degToRad(float a) { return a*M_PI/180.0;}
 float FixAng(float a){ if(a>359){ a-=360;} if(a<0){ a+=360;} return a;}
@@ -17,11 +15,14 @@ float px,py,pdx,pdy,pa;
 float frame1,frame2,fps;
 int gameState=0, timer=0; //game state. init, start screen, game loop, win/lose
 float fade=0;             //the 3 screens can fade up from black
+RainEffect rainEffect(500); // Initialize with 500 particles
+
 
 typedef struct
 {
  int w,a,d,s;                     //button state on off
 }ButtonKeys; ButtonKeys Keys;
+
 
 //-----------------------------MAP----------------------------------------------
 #define mapX  8      //map width
@@ -32,7 +33,7 @@ typedef struct
 int mapW[]=          //walls
 {
  1,1,1,1,2,2,2,2,
- 6,0,0,1,0,0,0,2,
+ 1,0,0,1,0,0,0,2,
  1,0,0,4,0,2,0,2,
  1,5,4,5,0,0,0,2,
  2,0,0,0,0,0,0,1,
@@ -66,20 +67,22 @@ int mapC[]=          //ceiling
 };
 
 
-typedef struct       //All veriables per sprite
-{
- int type;           //static, key, enemy
- int state;          //on off
- int map;            //texture to show
- float x,y,z;        //position
-}sprite; sprite sp[4];
+// Minimap variables
+#define MINIMAP_SCALE 0.2
+#define MINIMAP_X 10
+#define MINIMAP_Y 10
+#define MINIMAP_TILE_SIZE (mapS * MINIMAP_SCALE)
+
+
 int depth[120];      //hold wall line depth to compare for sprite depth
+
+sprite sp[4]; // Define sprites
 
 void drawSprite()
 {
  int x,y,s;
  if(px<sp[0].x+30 && px>sp[0].x-30 && py<sp[0].y+30 && py>sp[0].y-30){ sp[0].state=0;} //pick up key 	
- if(px<sp[3].x+30 && px>sp[3].x-30 && py<sp[3].y+30 && py>sp[3].y-30){ gameState=4;} //enemy kills
+ if(px<sp[3].x+30 && px>sp[3].x-30 && py<sp[3].y+30 && py>sp[3].y-30){ gameState=3;} //enemy kills
 
  //enemy attack
  int spx=(int)sp[3].x>>6,          spy=(int)sp[3].y>>6;          //normal grid position
@@ -278,6 +281,8 @@ void init()//init all variables when game starts
  sp[1].type=2; sp[1].state=1; sp[1].map=1; sp[1].x=1.5*64; sp[1].y=4.5*64; sp[1].z= 0; //light 1
  sp[2].type=2; sp[2].state=1; sp[2].map=1; sp[2].x=3.5*64; sp[2].y=4.5*64; sp[2].z= 0; //light 2
  sp[3].type=3; sp[3].state=1; sp[3].map=2; sp[3].x=2.5*64; sp[3].y=2*64;   sp[3].z=20; //enemy
+ rainEffect.initializeParticles(); // Initialize rain particles
+
 }
 
 
@@ -288,8 +293,8 @@ void display()
  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
 
  if(gameState==0){ init(); fade=0; timer=0; gameState=1;} //init game
- if(gameState==1){ screen(1); timer+=1*fps; if(timer>2000){ fade=0; timer=0; gameState=2;}} //start screen
- if(gameState==2) //The main game loop
+//  if(gameState==1){ screen(1); timer+=1*fps; if(timer>2000){ fade=0; timer=0; gameState=2;}} //start screen
+ if(gameState==1) //The main game loop
  {
   //buttons
   if(Keys.a==1){ pa+=0.2*fps; pa=FixAng(pa); pdx=cos(degToRad(pa)); pdy=-sin(degToRad(pa));} 	
@@ -312,23 +317,29 @@ void display()
   drawSky();
   drawRays2D();
   drawSprite();
-  if( (int)px>>6==1 && (int)py>>6==1 ){ fade=0; timer=0; gameState=3;} //Entered block 1, Win game!!
+  drawMinimap(mapW, mapX, mapY, px, py, pdx, pdy, sp, 4);
+  // Update and draw rain
+  rainEffect.update(); // Update rain particle positions
+  rainEffect.draw();   // Render rain particles
+
+  if( (int)px>>6==1 && (int)py>>6==1 ){ fade=0; timer=0; gameState=2;} //Entered block 1, Win game!!
  }
 
- if(gameState==3){ screen(2); timer+=1*fps; if(timer>2000){ fade=0; timer=0; gameState=0;}} //won screen
- if(gameState==4){ screen(3); timer+=1*fps; if(timer>2000){ fade=0; timer=0; gameState=0;}} //lost screen
-
+ if(gameState==2){ screen(2); timer+=1*fps; if(timer>2000){ fade=0; timer=0; gameState=0;}} //won screen
+ if(gameState==3){ screen(3); timer+=1*fps; if(timer>2000){ fade=0; timer=0; gameState=0;}} //lost screen
+ 
  glutPostRedisplay();
  glutSwapBuffers();  
 }
 
-void ButtonDown(unsigned char key,int x,int y)                                  //keyboard button pressed down
+void ButtonDown(unsigned char key,int x,int y)
 {
  if(key=='a'){ Keys.a=1;} 	
  if(key=='d'){ Keys.d=1;} 
  if(key=='w'){ Keys.w=1;}
  if(key=='s'){ Keys.s=1;}
- if(key=='e' && sp[0].state==0)             //open doors
+ if(key=='e' && sp[0].state==0) //open doors
+ if (key == 'm') toggleMinimap();
  { 
   int xo=0; if(pdx<0){ xo=-25;} else{ xo=25;}
   int yo=0; if(pdy<0){ yo=-25;} else{ yo=25;} 
@@ -336,16 +347,16 @@ void ButtonDown(unsigned char key,int x,int y)                                  
   int ipy=py/64.0, ipy_add_yo=(py+yo)/64.0;
   if(mapW[ipy_add_yo*mapX+ipx_add_xo]==4){ mapW[ipy_add_yo*mapX+ipx_add_xo]=0;}
  }
-
  glutPostRedisplay();
 }
 
-void ButtonUp(unsigned char key,int x,int y)                                    //keyboard button pressed up
+void ButtonUp(unsigned char key,int x,int y)
 {
  if(key=='a'){ Keys.a=0;} 	
  if(key=='d'){ Keys.d=0;} 
  if(key=='w'){ Keys.w=0;}
  if(key=='s'){ Keys.s=0;}
+ if (key == 'm') toggleMinimap();
  glutPostRedisplay();
 }
 
@@ -360,7 +371,7 @@ int main(int argc, char* argv[])
  glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
  glutInitWindowSize(960,640);
  glutInitWindowPosition( glutGet(GLUT_SCREEN_WIDTH)/2-960/2 ,glutGet(GLUT_SCREEN_HEIGHT)/2-640/2 );
- glutCreateWindow("YouTube-3DSage");
+ glutCreateWindow("Maze");
  gluOrtho2D(0,960,640,0);
  init();
  glutDisplayFunc(display);
